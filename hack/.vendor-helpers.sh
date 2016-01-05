@@ -3,7 +3,15 @@
 PROJECT=github.com/docker/containerd
 
 # Downloads dependencies into vendor/ directory
-mkdir -p vendor
+mkdir -p vendor/src
+
+if ! go list "$PROJECT/containerd" &> /dev/null; then
+	rm -rf .gopath
+	mkdir -p ".gopath/src/$(dirname "$PROJECT")"
+	ln -sf ../../../.. ".gopath/src/$PROJECT"
+	export GOPATH="$PWD/.gopath"
+fi
+export GOPATH="$GOPATH:$PWD/vendor"
 
 clone() {
 	local vcs="$1"
@@ -12,7 +20,7 @@ clone() {
 	local url="$4"
 
 	: ${url:=https://$pkg}
-	local target="vendor/$pkg"
+	local target="vendor/src/$pkg"
 
 	echo -n "$pkg @ $rev: "
 
@@ -44,6 +52,12 @@ clone() {
 clean() {
 	echo
 
+	# "main" packages
+	local packages=(
+		"$PROJECT/containerd"
+		"$PROJECT/ctr"
+		"$PROJECT/hack/benchmark.go"
+	)
 	local tags='runc libcontainer seccomp'
 	local platforms=(linux/amd64 linux/386 linux/arm windows/amd64 windows/385 darwin/amd64)
 
@@ -53,8 +67,8 @@ clean() {
 		for platform in $platforms; do
 			export GOOS="${platform%/*}";
 			export GOARCH="${platform##*/}";
-			go list -e -tags="$tags" -f '{{join .Deps "\n"}}' "${PROJECT}/..."
-			go list -e -tags="$tags" -f '{{join .TestImports "\n"}}' "${PROJECT}/..."
+			go list -e -tags="$tags" -f '{{join .Deps "\n"}}' "${packages[@]}"
+			go list -e -tags="$tags" -f '{{join .TestImports "\n"}}' "${packages[@]}"
 		done | grep -vE "^${PROJECT}" | sort -u
 	) )
 	imports=( $(go list -e -f '{{if not .Standard}}{{.ImportPath}}{{end}}' "${imports[@]}") )
@@ -64,10 +78,10 @@ clean() {
 	findArgs=()
 	for import in "${imports[@]}"; do
 		[ "${#findArgs[@]}" -eq 0 ] || findArgs+=( -or )
-		findArgs+=( -path "vendor/$import" )
+		findArgs+=( -path "vendor/src/$import" )
 	done
 	local IFS=$'\n'
-	local prune=( $(find vendor -depth -type d -not '(' "${findArgs[@]}" ')') )
+	local prune=( $(find vendor/src -depth -type d -not '(' "${findArgs[@]}" ')') )
 	unset IFS
 	for dir in "${prune[@]}"; do
 		find "$dir" -maxdepth 1 -not -type d -not -name 'LICENSE*' -not -name 'COPYING*' -exec rm -v -f '{}' ';'
@@ -75,7 +89,7 @@ clean() {
 	done
 
 	echo -n 'pruning unused files, '
-	find vendor -type f -name '*_test.go' -exec rm -v '{}' ';'
+	find vendor/src -type f -name '*_test.go' -exec rm -v '{}' ';'
 
 	echo done
 }
